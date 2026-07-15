@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://freeholt.dev/androidconnect/messages.schema.json",
+  "title": "AndroidConnect control messages (protocol v1)",
+  "description": "Authoritative schema for type 0x00 JSON control frames. Each message is discriminated by the string field `t`. Keep in sync with PROTOCOL.md and both implementations.",
+  "type": "object",
+  "required": ["t"],
+  "properties": { "t": { "type": "string" } },
+  "oneOf": [
+    {
+      "title": "hello",
+      "properties": {
+        "t": { "const": "hello" },
+        "pv": { "type": "integer", "minimum": 1 },
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "plat": { "enum": ["macos", "android"] },
+        "appVersion": { "type": "string" },
+        "caps": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["t", "pv", "id", "name", "plat", "caps"],
+      "additionalProperties": false
+    },
+    {
+      "title": "ping",
+      "properties": { "t": { "const": "ping" }, "nonce": { "type": "string" } },
+      "required": ["t", "nonce"], "additionalProperties": false
+    },
+    {
+      "title": "pong",
+      "properties": { "t": { "const": "pong" }, "nonce": { "type": "string" } },
+      "required": ["t", "nonce"], "additionalProperties": false
+    },
+    {
+      "title": "pairRequest",
+      "properties": {
+        "t": { "const": "pairRequest" },
+        "id": { "type": "string" }, "name": { "type": "string" },
+        "plat": { "enum": ["macos", "android"] },
+        "fp": { "type": "string" }, "token": { "type": "string" }
+      },
+      "required": ["t", "id", "name", "plat", "fp"], "additionalProperties": false
+    },
+    {
+      "title": "pairResponse",
+      "properties": {
+        "t": { "const": "pairResponse" },
+        "accepted": { "type": "boolean" },
+        "id": { "type": "string" }, "name": { "type": "string" },
+        "plat": { "enum": ["macos", "android"] },
+        "fp": { "type": "string" }, "reason": { "type": "string" }
+      },
+      "required": ["t", "accepted"], "additionalProperties": false
+    },
+    {
+      "title": "clipboard",
+      "properties": {
+        "t": { "const": "clipboard" },
+        "contentType": { "const": "text" },
+        "text": { "type": "string" }
+      },
+      "required": ["t", "contentType", "text"], "additionalProperties": false
+    },
+    {
+      "title": "notifPosted",
+      "properties": {
+        "t": { "const": "notifPosted" },
+        "key": { "type": "string" }, "appName": { "type": "string" },
+        "pkg": { "type": "string" }, "title": { "type": "string" },
+        "text": { "type": "string" }, "when": { "type": "integer" },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" }, "title": { "type": "string" },
+              "remoteInput": { "type": "boolean" }
+            },
+            "required": ["id", "title"], "additionalProperties": false
+          }
+        }
+      },
+      "required": ["t", "key", "appName", "pkg"], "additionalProperties": false
+    },
+    {
+      "title": "notifRemoved",
+      "properties": { "t": { "const": "notifRemoved" }, "key": { "type": "string" } },
+      "required": ["t", "key"], "additionalProperties": false
+    },
+    {
+      "title": "notifAction",
+      "properties": {
+        "t": { "const": "notifAction" }, "key": { "type": "string" },
+        "actionId": { "type": "string" }, "reply": { "type": "string" }
+      },
+      "required": ["t", "key", "actionId"], "additionalProperties": false
+    },
+    {
+      "title": "notifDismiss",
+      "properties": { "t": { "const": "notifDismiss" }, "key": { "type": "string" } },
+      "required": ["t", "key"], "additionalProperties": false
+    },
+    {
+      "title": "fileOffer",
+      "properties": {
+        "t": { "const": "fileOffer" },
+        "transferId": { "type": "string" }, "name": { "type": "string" },
+        "size": { "type": "integer", "minimum": 0 }, "mime": { "type": "string" }
+      },
+      "required": ["t", "transferId", "name", "size"], "additionalProperties": false
+    },
+    {
+      "title": "fileAccept",
+      "properties": { "t": { "const": "fileAccept" }, "transferId": { "type": "string" } },
+      "required": ["t", "transferId"], "additionalProperties": false
+    },
+    {
+      "title": "fileReject",
+      "properties": {
+        "t": { "const": "fileReject" }, "transferId": { "type": "string" },
+        "reason": { "type": "string" }
+      },
+      "required": ["t", "transferId"], "additionalProperties": false
+    },
+    {
+      "title": "fileComplete",
+      "properties": {
+        "t": { "const": "fileComplete" }, "transferId": { "type": "string" },
+        "sha256": { "type": "string" }
+      },
+      "required": ["t", "transferId"], "additionalProperties": false
+    },
+    {
+      "title": "fileError",
+      "properties": {
+        "t": { "const": "fileError" }, "transferId": { "type": "string" },
+        "message": { "type": "string" }
+      },
+      "required": ["t", "transferId", "message"], "additionalProperties": false
+    },
+    {
+      "title": "callState",
+      "properties": {
+        "t": { "const": "callState" }, "callId": { "type": "string" },
+        "state": { "enum": ["ringing", "active", "dialing", "disconnected"] },
+        "direction": { "enum": ["incoming", "outgoing"] },
+        "number": { "type": "string" }, "contactName": { "type": "string" }
+      },
+      "required": ["t", "callId", "state", "direction"], "additionalProperties": false
+    },
+    {
+      "title": "callAction",
+      "properties": {
+        "t": { "const": "callAction" }, "callId": { "type": "string" },
+        "action": { "enum": ["answer", "decline", "end", "mute", "unmute"] }
+      },
+      "required": ["t", "callId", "action"], "additionalProperties": false
+    }
+  ]
+}

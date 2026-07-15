@@ -1,0 +1,38 @@
+# ─── General ───────────────────────────────────────────────
+.DS_Store
+*.log
+*.tmp
+
+# ─── macOS / Xcode ─────────────────────────────────────────
+macos/**/xcuserdata/
+macos/**/*.xcuserstate
+macos/**/DerivedData/
+macos/**/build/
+macos/**/*.xcscmblueprint
+macos/**/*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# ─── Android / Gradle / Kotlin ─────────────────────────────
+android/.gradle/
+android/**/build/
+android/local.properties
+android/captures/
+android/.cxx/
+android/*.apk
+android/*.aab
+android/*.keystore
+android/**/*.iml
+android/.kotlin/
+android/.idea/*
+!android/.idea/runConfigurations
+android/app/release/
+
+# ─── Keys / secrets (never commit) ─────────────────────────
+*.p12
+*.jks
+keystore.properties
+secrets.properties

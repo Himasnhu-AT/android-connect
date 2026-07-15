@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AndroidConnect</string>
+    <string name="connection_channel_name">Connection</string>
+    <string name="connection_channel_desc">Keeps the link to your Mac alive.</string>
+    <string name="mirror_channel_name">Mirrored notifications</string>
+</resources>

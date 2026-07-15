@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Pure-Compose app: the XML theme only needs to be no-action-bar + set the window
+         background so the launch frame matches. All real theming lives in Compose (ui/theme). -->
+    <style name="Theme.AndroidConnect" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/surface</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

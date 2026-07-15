@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Trust store / pairing keys live in the Android Keystore and are intentionally NOT backed up. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="trust_store.xml" />
+</full-backup-content>

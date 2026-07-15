@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Custom keys merged into the generated Info.plist (GENERATE_INFOPLIST_FILE=YES uses this as base). -->
+
+	<!-- macOS 15+ prompts for local-network access on first mDNS/Bonjour use. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>AndroidConnect discovers and links to your paired phone on your local Wi-Fi network.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_androidconnect._tcp</string>
+	</array>
+</dict>
+</plist>
