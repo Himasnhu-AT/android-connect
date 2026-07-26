@@ -3,6 +3,7 @@ package com.himanshuat.androidconnect.connectivity
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.util.Log
 
 /** A device found on the network, resolved to a reachable host/port. */
 data class DiscoveredPeer(
@@ -32,12 +33,17 @@ class NsdDiscovery(context: Context) {
             txt.forEach { (key, value) -> setAttribute(key, value) }
         }
         val listener = object : NsdManager.RegistrationListener {
-            override fun onServiceRegistered(info: NsdServiceInfo) {}
-            override fun onRegistrationFailed(info: NsdServiceInfo, errorCode: Int) {}
+            override fun onServiceRegistered(info: NsdServiceInfo) {
+                Log.i("ACDebug", "NSD registered as '${info.serviceName}' port=$port")
+            }
+            override fun onRegistrationFailed(info: NsdServiceInfo, errorCode: Int) {
+                Log.e("ACDebug", "NSD registration FAILED errorCode=$errorCode (0=INTERNAL,1=ALREADY_ACTIVE,2=MAX_LIMIT)")
+            }
             override fun onServiceUnregistered(info: NsdServiceInfo) {}
             override fun onUnregistrationFailed(info: NsdServiceInfo, errorCode: Int) {}
         }
         registrationListener = listener
+        Log.i("ACDebug", "NSD registering '$serviceName' type=$SERVICE_TYPE port=$port")
         nsd.registerService(info, NsdManager.PROTOCOL_DNS_SD, listener)
     }
 

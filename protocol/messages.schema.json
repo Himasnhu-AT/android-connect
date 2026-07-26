@@ -53,6 +53,19 @@
       "required": ["t", "accepted"], "additionalProperties": false
     },
     {
+      "title": "authChallenge",
+      "properties": { "t": { "const": "authChallenge" }, "nonce": { "type": "string" } },
+      "required": ["t", "nonce"], "additionalProperties": false
+    },
+    {
+      "title": "authResponse",
+      "properties": {
+        "t": { "const": "authResponse" },
+        "cert": { "type": "string" }, "sig": { "type": "string" }
+      },
+      "required": ["t", "cert", "sig"], "additionalProperties": false
+    },
+    {
       "title": "clipboard",
       "properties": {
         "t": { "const": "clipboard" },

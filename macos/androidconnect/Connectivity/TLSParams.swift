@@ -25,19 +25,13 @@ nonisolated enum TLSParams {
         if let secIdentity = sec_identity_create(identity.secIdentity) {
             sec_protocol_options_set_local_identity(sec, secIdentity)
         }
-        // Require the peer to present a cert too (mutual TLS).
-        sec_protocol_options_set_peer_authentication_required(sec, true)
+        // Server-auth only. macOS Network.framework cannot verify a peer *client* certificate as a
+        // TLS server (the verify block is never invoked for it — it just fails the handshake), so we
+        // don't request one. The phone (always the TLS client) verifies OUR cert by fingerprint via
+        // its own trust manager, then proves its own identity at the app layer (authChallenge, §4).
+        sec_protocol_options_set_peer_authentication_required(sec, false)
         sec_protocol_options_set_min_tls_protocol_version(sec, .TLSv12)
-
-        // Replace CA validation with our own fingerprint pinning.
-        sec_protocol_options_set_verify_block(
-            sec,
-            { metadata, _, complete in
-                let fingerprint = peerLeafFingerprint(metadata)
-                complete(accept(fingerprint ?? ""))
-            },
-            verifyQueue,
-        )
+        _ = accept  // retained for API symmetry; unused now that we don't verify a client cert
 
         let params = NWParameters(tls: tls)
         params.includePeerToPeer = true
@@ -55,6 +49,4 @@ nonisolated enum TLSParams {
         }
         return fingerprint
     }
-
-    private static let verifyQueue = DispatchQueue(label: "dev.freeholt.androidconnect.tls-verify")
 }

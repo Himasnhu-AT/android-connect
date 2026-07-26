@@ -33,6 +33,7 @@ struct MenuContent: View {
                 callBanner(call, manager)
             }
             statusRow(manager.statusText)
+            pairingToggle(manager)
             pairedSection(manager)
             discoveredSection(manager)
             transfersSection(manager)
@@ -69,6 +70,20 @@ struct MenuContent: View {
                 .font(.headline)
             Spacer()
         }
+    }
+
+    private func pairingToggle(_ manager: ConnectionManager) -> some View {
+        Toggle(isOn: Binding(get: { manager.isPairing }, set: { manager.setPairing($0) })) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Ready to pair").font(.subheadline)
+                Text(manager.isPairing
+                     ? "Accepting a new phone — scan the QR or tap this Mac on the phone"
+                     : "Turn on to pair a new phone")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .toggleStyle(.switch)
     }
 
     private func statusRow(_ text: String) -> some View {

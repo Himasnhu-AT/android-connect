@@ -1,6 +1,7 @@
 package com.himanshuat.androidconnect.connectivity
 
 import android.content.Context
+import android.util.Log
 import com.himanshuat.androidconnect.LocalPrefs
 import com.himanshuat.androidconnect.pairing.DeviceIdentity
 import com.himanshuat.androidconnect.pairing.PairedPeer
@@ -10,6 +11,8 @@ import com.himanshuat.androidconnect.features.ClipboardHandler
 import com.himanshuat.androidconnect.features.FileTransferHandler
 import com.himanshuat.androidconnect.features.NotificationSink
 import com.himanshuat.androidconnect.pairing.TrustStore
+import com.himanshuat.androidconnect.protocol.AuthChallenge
+import com.himanshuat.androidconnect.protocol.AuthResponse
 import com.himanshuat.androidconnect.protocol.CallAction
 import com.himanshuat.androidconnect.protocol.Clipboard
 import com.himanshuat.androidconnect.protocol.ControlMessage
@@ -25,6 +28,7 @@ import com.himanshuat.androidconnect.protocol.PairResponse
 import com.himanshuat.androidconnect.protocol.Ping
 import com.himanshuat.androidconnect.protocol.Pong
 import com.himanshuat.androidconnect.protocol.ProtocolCodec
+import java.util.Base64
 import java.util.UUID
 import javax.net.ssl.SSLServerSocket
 import javax.net.ssl.SSLSocket
@@ -123,9 +127,12 @@ class ConnectionManager(context: Context) {
                 }
                 launch {
                     try {
+                        Log.i(TAG, "inbound TCP from ${socket.inetAddress?.hostAddress}; starting TLS")
                         socket.startHandshake()
+                        Log.i(TAG, "inbound TLS handshake OK")
                         adopt(Connection(socket, isServer = true, scope))
-                    } catch (_: Exception) {
+                    } catch (e: Exception) {
+                        Log.e(TAG, "inbound handshake FAILED: ${e.javaClass.simpleName}: ${e.message}", e)
                         runCatching { socket.close() }
                     }
                 }
@@ -138,11 +145,14 @@ class ConnectionManager(context: Context) {
         gate.setPairingMode(on)
     }
 
+    // The phone is always the TLS client — it dials the Mac (the Mac can't verify a client cert as a
+    // TLS server, and on many networks only phone→Mac connections get through). It proves its own
+    // identity to the Mac at the app layer via [AuthChallenge]/[AuthResponse].
     fun pair(peer: DiscoveredPeer) = dial(peer.host, peer.port, peer.fingerprint)
 
     /** Pair from a scanned `ac://pair?host=&port=&fp=&token=` QR (bypasses mDNS resolution). */
     fun pairViaQr(url: String) {
-        val uri = android.net.Uri.parse(url)
+        val uri = Uri.parse(url)
         val host = uri.getQueryParameter("host") ?: return
         val port = uri.getQueryParameter("port")?.toIntOrNull() ?: return
         val fingerprint = uri.getQueryParameter("fp") ?: return
@@ -153,8 +163,11 @@ class ConnectionManager(context: Context) {
         gate.allow(fingerprint)
         scope.launch(Dispatchers.IO) {
             try {
+                Log.i(TAG, "dialing $host:$port (pinning fp=$fingerprint)")
                 adopt(Connection(transport.connect(host, port), isServer = false, scope))
+                Log.i(TAG, "dial handshake OK → peerFp=$activeFingerprint")
             } catch (e: Exception) {
+                Log.e(TAG, "dial to $host:$port FAILED: ${e.javaClass.simpleName}: ${e.message}", e)
                 connectingId = null // let auto-reconnect retry after a failed dial
                 _status.value = "Couldn't connect: ${e.message}"
             }
@@ -186,11 +199,7 @@ class ConnectionManager(context: Context) {
         activeFingerprint = connection.peerFingerprint
         lastPeerHello = null
         connection.send(hello())
-        if (!connection.isServer && !trust.isTrusted(activeFingerprint)) {
-            connection.send(
-                PairRequest(id = deviceId, name = deviceName, plat = "android", fp = identity.fingerprint),
-            )
-        }
+        // We prove our identity in response to the Mac's authChallenge (below), not via a pairRequest.
         connection.receiveLoop(
             onMessage = { handleMessage(it, connection) },
             onBinary = { id, data -> fileTransfer.handleChunk(id, data) },
@@ -213,12 +222,10 @@ class ConnectionManager(context: Context) {
         maybeAutoConnect()
     }
 
-    /** Silent reconnect: dial a trusted, discovered peer. Lower deviceId initiates (avoids flapping). */
+    /** Silent reconnect: the phone dials any trusted Mac it discovers (the phone is always client). */
     private fun maybeAutoConnect() {
         if (active != null || connectingId != null) return
-        val peer = _discovered.value.firstOrNull {
-            trust.isTrusted(it.fingerprint) && deviceId < it.id
-        } ?: return
+        val peer = _discovered.value.firstOrNull { trust.isTrusted(it.fingerprint) } ?: return
         connectingId = peer.id
         pair(peer)
     }
@@ -243,6 +250,18 @@ class ConnectionManager(context: Context) {
             }
 
             is Ping -> connection.send(Pong(message.nonce))
+
+            is AuthChallenge -> {
+                // Prove we hold our identity key: sign the Mac's nonce and return our certificate.
+                Log.i(TAG, "answering authChallenge")
+                val sig = identity.sign(message.nonce.toByteArray())
+                connection.send(
+                    AuthResponse(
+                        cert = Base64.getEncoder().encodeToString(identity.certificateDer),
+                        sig = Base64.getEncoder().encodeToString(sig),
+                    ),
+                )
+            }
 
             is Clipboard -> clipboard.apply(message.text)
 
@@ -308,5 +327,6 @@ class ConnectionManager(context: Context) {
 
     private companion object {
         const val PING_INTERVAL_MS = 20_000L
+        const val TAG = "ACDebug"
     }
 }

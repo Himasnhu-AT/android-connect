@@ -1,5 +1,7 @@
 package com.himanshuat.androidconnect
 
+import com.himanshuat.androidconnect.protocol.AuthChallenge
+import com.himanshuat.androidconnect.protocol.AuthResponse
 import com.himanshuat.androidconnect.protocol.CallState
 import com.himanshuat.androidconnect.protocol.Clipboard
 import com.himanshuat.androidconnect.protocol.ControlMessage
@@ -29,6 +31,8 @@ class ProtocolTest {
     @Test fun `every message type round-trips`() {
         roundTrip(Hello(pv = 1, id = "mac-1", name = "MacBook", plat = "macos", caps = listOf("clipboard", "files")))
         roundTrip(Ping("n1"))
+        roundTrip(AuthChallenge("bm9uY2U="))
+        roundTrip(AuthResponse(cert = "Y2VydERFUg==", sig = "c2lnbmF0dXJl"))
         roundTrip(Clipboard(text = "hello world"))
         roundTrip(FileOffer(transferId = "t1", name = "photo.jpg", size = 12345, mime = "image/jpeg"))
         roundTrip(

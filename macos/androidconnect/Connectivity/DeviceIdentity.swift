@@ -66,6 +66,17 @@ nonisolated enum DeviceIdentity {
         SHA256.hash(data: der).map { String(format: "%02x", $0) }.joined()
     }
 
+    /// Verifies an ECDSA-SHA256 `signature` over `data` made by the key in `certDER`. Returns that
+    /// cert's fingerprint if the signature is valid (proving the peer holds the key), else nil.
+    /// This is how the Mac authenticates the phone, since it can't verify a client cert over TLS.
+    static func verify(signature: Data, over data: Data, certDER: Data) -> String? {
+        guard let certificate = SecCertificateCreateWithData(nil, certDER as CFData),
+              let publicKey = SecCertificateCopyKey(certificate) else { return nil }
+        let ok = SecKeyVerifySignature(
+            publicKey, .ecdsaSignatureMessageX962SHA256, data as CFData, signature as CFData, nil)
+        return ok ? fingerprint(of: certDER) : nil
+    }
+
     // MARK: - Certificate construction (pure; unit-tested without the Keychain)
 
     static func makeSelfSignedCertificate(

@@ -27,9 +27,13 @@ same. The TXT record carries:
 
 ## 2. Transport & framing
 
-One persistent **TLS 1.3** TCP connection per paired peer (the "control connection"). The device
-that initiates is the TLS **client**; the advertiser is the TLS **server**. Both present their
-self-signed cert; authentication is by **fingerprint pinning** (see §4), not a CA.
+One persistent **TLS 1.3** TCP connection per paired peer (the "control connection"). **The Android
+device is always the TLS client (it dials); the Mac is always the TLS server (it advertises + listens).**
+The Mac is authenticated by its **server certificate** (fingerprint-pinned by the phone, see §4). The
+phone is **not** authenticated by a client certificate — Apple's Network.framework can't verify a peer
+client cert as a TLS server — so the phone proves its identity at the **app layer** with a signed
+challenge (`authChallenge`/`authResponse`, §3 & §4). This also means only phone→Mac connectivity is
+required, which survives Wi-Fi client-isolation.
 
 All bytes after the TLS handshake are **frames**:
 
@@ -61,8 +65,16 @@ See `messages.schema.json` for the authoritative schema.
   `nonce`. Two missed pongs ⇒ treat peer as offline and reconnect.
 
 ### Pairing  (exchanged on a not-yet-trusted but TLS-encrypted connection — see §4)
-- `pairRequest`  — `{ t, id, name, plat, fp, token? }`
-- `pairResponse` — `{ t, accepted, id, name, plat, fp, reason? }`
+- `pairResponse` — `{ t, accepted, id, name, plat, fp, reason? }` — Mac → phone, sent after the phone
+  passes the identity challenge, to confirm (or refuse) the pairing.
+- `pairRequest`  — `{ t, id, name, plat, fp, token? }` — reserved; superseded by `authResponse` below.
+
+### Identity proof  (replaces TLS client-cert auth, which macOS servers can't do)
+- `authChallenge` — `{ t, nonce }` — **Mac → phone**, immediately after the connection is ready.
+  `nonce` is base64 of 32 random bytes.
+- `authResponse`  — `{ t, cert, sig }` — **phone → Mac**. `cert` = base64 DER of the phone's TLS
+  certificate; `sig` = base64 **ECDSA-SHA256** signature over the `nonce`'s UTF-8 bytes. The Mac
+  verifies `sig` against `cert`'s public key and pins `SHA-256(cert)` as the phone's fingerprint.
 
 ### Clipboard
 - `clipboard` — `{ t, contentType: "text", text }` — sent when the local clipboard changes.
@@ -96,16 +108,18 @@ See `messages.schema.json` for the authoritative schema.
    (macOS: CryptoKit/Security + **Keychain**; Android: **Android Keystore**). `fp` = SHA-256 of the
    cert's DER encoding, hex, lowercase, colon-free.
 2. **QR pairing (primary, "effortless"):** the Mac shows a QR encoding
-   `ac://pair?host=<ip>&port=<p>&fp=<macFp>&token=<oneTime>`. The phone scans it, connects, and
-   **verifies the server cert fingerprint equals `fp` from the QR** (defeats MITM). It then sends
-   `pairRequest{ fp: <phoneFp>, token }`. The Mac checks `token`, pins the phone's `fp`, replies
-   `pairResponse{ accepted:true, fp:<macFp> }`. The phone pins the Mac's `fp`. Both persist the peer
-   `{id,name,plat,fp}` in their trust store.
+   `ac://pair?host=<ip>&port=<p>&fp=<macFp>&token=<oneTime>`. The phone scans it, connects (as the TLS
+   **client**), and **verifies the Mac's server-cert fingerprint equals `fp` from the QR** (defeats
+   MITM). The Mac sends `authChallenge{nonce}`; the phone replies `authResponse{cert,sig}`. The Mac
+   verifies the signature and **pins `SHA-256(cert)` as the phone's fingerprint**, then (if it is in
+   pairing mode) replies `pairResponse{ accepted:true, fp:<macFp> }`. The phone pins the Mac's `fp`.
+   Both persist the peer `{id,name,plat,fp}` in their trust store.
 3. **Numeric SAS fallback (no camera):** derive a 6-digit code from the TLS exporter secret
    (`TLS-Exporter`, label `"ac-pair"`, 4 bytes → decimal mod 1e6) on both sides; the user confirms
    the codes match, then the same `pairRequest`/`pairResponse` exchange runs.
-4. **Reconnect:** a browsed peer whose TXT `fp` is already pinned is trusted automatically — connect,
-   verify the presented cert fingerprint matches the pinned `fp`, exchange `hello`, done. No prompts.
+4. **Reconnect:** the phone auto-dials any browsed Mac whose TXT `fp` it has already pinned — it
+   verifies the Mac's server cert matches the pinned `fp`, answers the `authChallenge`, exchanges
+   `hello`, done. No prompts.
 5. **Unpair:** drop the peer from the trust store; the next connection attempt from it is refused.
 
 Any cert-fingerprint mismatch (pinned ≠ presented) ⇒ **abort the connection** and surface a warning.

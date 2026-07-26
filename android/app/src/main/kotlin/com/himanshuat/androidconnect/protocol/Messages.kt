@@ -56,6 +56,19 @@ data class PairResponse(
     val reason: String? = null,
 ) : ControlMessage
 
+// Identity proof — macOS can't verify a client cert as a TLS server, so the phone (the TLS client)
+// proves possession of its identity key at the app layer: sign the Mac's nonce, return our cert.
+@Serializable
+@SerialName("authChallenge")
+data class AuthChallenge(val nonce: String) : ControlMessage
+
+@Serializable
+@SerialName("authResponse")
+data class AuthResponse(
+    val cert: String,   // base64 DER of our TLS certificate
+    val sig: String,    // base64 ECDSA-SHA256 signature over the nonce's UTF-8 bytes
+) : ControlMessage
+
 // ── Clipboard ────────────────────────────────────────────────────────────────
 
 @Serializable
