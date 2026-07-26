@@ -1,23 +1,22 @@
 #!/usr/bin/env bash
 #
-# build.sh — build the AndroidConnect macOS and Android apps into ./dist.
+# build.sh — build the AndroidConnect apps into ./dist.
+#
+# Default: a SIGNED release APK + the macOS app, with signatures verified.
 #
 # Usage:
-#   ./build.sh            # build both platforms
-#   ./build.sh macos      # macOS only
-#   ./build.sh android    # Android only
+#   ./build.sh            # both: signed APK + macOS app
+#   ./build.sh macos      # macOS app only
+#   ./build.sh android    # signed APK only
 #
 # Environment overrides:
+#   WITH_DEBUG=1               also build the debug APK (for in-place dev installs)
 #   MAC_CONFIG=Release|Debug   macOS build configuration        (default: Release)
 #   JAVA_HOME=<path>           JDK for Gradle; must be 17–21     (default: Android Studio JBR)
 #   ANDROID_HOME=<path>        Android SDK                       (default: ~/Library/Android/sdk)
 #
-# Outputs (./dist):
-#   macos/androidconnect.app                         runnable app bundle
-#   macos/androidconnect-macos-<ver>-<sha>.zip       zipped bundle for distribution
-#   android/androidconnect-debug-<ver>-<sha>.apk     installable debug APK
-#   android/androidconnect-release-unsigned-<ver>-<sha>.apk   R8-minified release APK (unsigned)
-#   BUILD_MANIFEST.txt                               sizes + SHA-256 of every artifact
+# The APK is signed with the key in android/keystore.properties (gitignored). If that file is
+# missing the release APK is unsigned and this script fails — see android/keystore.properties.
 #
 set -euo pipefail
 
@@ -31,6 +30,7 @@ LOG_DIR="$BUILD_TMP/logs"
 MANIFEST="$DIST/BUILD_MANIFEST.txt"
 
 MAC_CONFIG="${MAC_CONFIG:-Release}"
+WITH_DEBUG="${WITH_DEBUG:-0}"
 TARGET="${1:-all}"
 
 # ── pretty logging ───────────────────────────────────────────────────────────
@@ -42,12 +42,11 @@ die()  { printf '  %s✗ %s%s\n' "$R" "$*" "$N" >&2; exit 1; }
 
 GIT_SHA="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo nogit)"
 
-# record ARTIFACT in the manifest and echo a success line. Files get a SHA-256; dirs get size only.
 record() {
   local label="$1" path="$2" size csum
   size="$(du -sh "$path" 2>/dev/null | cut -f1)"
   if [ -f "$path" ]; then csum="$(shasum -a 256 "$path" | awk '{print $1}')"; else csum="(directory)"; fi
-  printf '%-48s  %6s  %s\n' "${path#"$DIST"/}" "$size" "$csum" >> "$MANIFEST"
+  printf '%-46s  %6s  %s\n' "${path#"$DIST"/}" "$size" "$csum" >> "$MANIFEST"
   ok "$label → dist/${path#"$DIST"/}  ($size)"
 }
 
@@ -82,13 +81,22 @@ build_macos() {
   zip="$DIST/macos/androidconnect-macos-$ver-$GIT_SHA.zip"
   ditto -c -k --keepParent "$app" "$zip"
 
-  record "app bundle" "$DIST/macos/androidconnect.app"
-  record "zipped bundle" "$zip"
+  # Verify the code signature so the output states plainly that the app is signed.
+  if codesign --verify --deep --strict "$DIST/macos/androidconnect.app" 2>/dev/null; then
+    local team
+    team="$(codesign -dv "$DIST/macos/androidconnect.app" 2>&1 | sed -nE 's/.*TeamIdentifier=([^ ]+).*/\1/p')"
+    ok "app is code-signed${team:+ (team $team)}"
+  else
+    warn "app is NOT code-signed (check Xcode signing settings)"
+  fi
+
+  record "macOS app" "$DIST/macos/androidconnect.app"
+  record "macOS app (zip)" "$zip"
 }
 
 # ── Android ──────────────────────────────────────────────────────────────────
 build_android() {
-  local ver jmajor glog dbg rel
+  local ver jmajor glog rel_signed rel_unsigned out bt apksigner tasks
 
   # Resolve a usable JDK: explicit JAVA_HOME → Android Studio JBR → /usr/libexec/java_home.
   if [ -z "${JAVA_HOME:-}" ] || [ ! -x "${JAVA_HOME:-}/bin/java" ]; then
@@ -99,6 +107,7 @@ build_android() {
   fi
   [ -x "${JAVA_HOME:-}/bin/java" ] || export JAVA_HOME="$(/usr/libexec/java_home 2>/dev/null || true)"
   [ -x "${JAVA_HOME:-}/bin/java" ] || die "No JDK found — set JAVA_HOME to a JDK 17–21 (e.g. Android Studio's JBR)."
+  export PATH="$JAVA_HOME/bin:$PATH"
 
   jmajor="$("$JAVA_HOME/bin/java" -version 2>&1 | sed -nE 's/.*version "([0-9]+).*/\1/p' | head -1)"
   # Kotlin 2.2.20's compiler cannot parse JDK 24+ version strings (throws IllegalArgumentException).
@@ -111,32 +120,52 @@ build_android() {
 
   ver="$(grep -m1 'versionName' "$ANDROID_DIR/app/build.gradle.kts" | sed -E 's/.*"([^"]+)".*/\1/')"
   ver="${ver:-0.0.0}"
-  log "Android · debug + release · v$ver · JDK $jmajor"
+
+  tasks="assembleRelease"
+  local dbgnote=""
+  [ "$WITH_DEBUG" = "1" ] && { tasks="assembleDebug assembleRelease"; dbgnote=" + debug"; }
+  log "Android · signed release$dbgnote · v$ver · JDK $jmajor"
 
   glog="$LOG_DIR/android-build.log"
-  if ! ( cd "$ANDROID_DIR" && ./gradlew --console=plain assembleDebug assembleRelease ) > "$glog" 2>&1; then
+  # shellcheck disable=SC2086
+  if ! ( cd "$ANDROID_DIR" && ./gradlew --console=plain $tasks ) > "$glog" 2>&1; then
     tail -30 "$glog" >&2
     die "Android build failed — full log: ${glog#"$ROOT"/}"
   fi
 
   rm -rf "$DIST/android"; mkdir -p "$DIST/android"
-  dbg="$ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk"
   rel_signed="$ANDROID_DIR/app/build/outputs/apk/release/app-release.apk"
   rel_unsigned="$ANDROID_DIR/app/build/outputs/apk/release/app-release-unsigned.apk"
 
-  [ -f "$dbg" ] || die "debug APK not produced"
-  cp "$dbg" "$DIST/android/androidconnect-debug-$ver-$GIT_SHA.apk"
-  record "debug APK (installable)" "$DIST/android/androidconnect-debug-$ver-$GIT_SHA.apk"
+  # AGP writes `app-release.apk` when a signingConfig is present, else `app-release-unsigned.apk`.
+  if [ ! -f "$rel_signed" ]; then
+    [ -f "$rel_unsigned" ] && die "release APK is UNSIGNED — add android/keystore.properties to sign it."
+    die "release APK not produced"
+  fi
 
-  # AGP names the release APK `app-release.apk` when a signingConfig is set, else `-unsigned`.
-  if [ -f "$rel_signed" ]; then
-    cp "$rel_signed" "$DIST/android/androidconnect-release-$ver-$GIT_SHA.apk"
-    record "release APK (R8-minified, signed)" "$DIST/android/androidconnect-release-$ver-$GIT_SHA.apk"
-  elif [ -f "$rel_unsigned" ]; then
-    cp "$rel_unsigned" "$DIST/android/androidconnect-release-unsigned-$ver-$GIT_SHA.apk"
-    record "release APK (R8-minified, UNSIGNED — set android/keystore.properties to sign)" "$DIST/android/androidconnect-release-unsigned-$ver-$GIT_SHA.apk"
+  out="$DIST/android/androidconnect-$ver-$GIT_SHA.apk"
+  cp "$rel_signed" "$out"
+
+  # Verify the APK signature so the output states plainly that it's signed.
+  bt="$(ls "$ANDROID_HOME/build-tools/" 2>/dev/null | sort -V | tail -1)"
+  apksigner="$ANDROID_HOME/build-tools/$bt/apksigner"
+  if [ -x "$apksigner" ]; then
+    if "$apksigner" verify "$out" >/dev/null 2>&1; then
+      local signer
+      signer="$("$apksigner" verify --print-certs "$out" 2>/dev/null | sed -nE 's/.*certificate DN: (.*)/\1/p' | head -1)"
+      ok "APK signature verified${signer:+ ($signer)}"
+    else
+      die "APK signature did NOT verify — check android/keystore.properties."
+    fi
   else
-    warn "release APK not found — skipped"
+    warn "apksigner not found — skipped signature verification"
+  fi
+
+  record "signed APK" "$out"
+
+  if [ "$WITH_DEBUG" = "1" ] && [ -f "$ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk" ]; then
+    cp "$ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk" "$DIST/android/androidconnect-debug-$ver-$GIT_SHA.apk"
+    record "debug APK (dev installs)" "$DIST/android/androidconnect-debug-$ver-$GIT_SHA.apk"
   fi
 }
 
@@ -148,8 +177,8 @@ mkdir -p "$DIST" "$LOG_DIR"
   echo "commit    : $GIT_SHA"
   echo "host      : macOS $(sw_vers -productVersion 2>/dev/null || echo '?')"
   echo
-  printf '%-48s  %6s  %s\n' "ARTIFACT" "SIZE" "SHA-256"
-  printf '%.0s-' {1..112}; echo
+  printf '%-46s  %6s  %s\n' "ARTIFACT" "SIZE" "SHA-256"
+  printf '%.0s-' {1..110}; echo
 } > "$MANIFEST"
 
 case "$TARGET" in
@@ -160,5 +189,5 @@ case "$TARGET" in
 esac
 
 echo
-log "Done — artifacts in ./dist"
+log "Done — signed artifacts in ./dist"
 cat "$MANIFEST"
