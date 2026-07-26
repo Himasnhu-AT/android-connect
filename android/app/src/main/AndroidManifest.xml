@@ -56,6 +56,17 @@
             </intent-filter>
         </activity>
 
+        <!-- Shares received files so they can be opened in other apps (tap a transfer). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- Owns the persistent TLS connection + NSD registration. -->
         <service
             android:name=".service.ConnectionService"

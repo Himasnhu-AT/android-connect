@@ -1,13 +1,16 @@
 package com.himanshuat.androidconnect.ui
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,11 +42,11 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -57,23 +60,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import com.himanshuat.androidconnect.connectivity.ConnectionManager
-import com.himanshuat.androidconnect.connectivity.DiscoveredPeer
 import com.himanshuat.androidconnect.features.FileTransferHandler
-import com.himanshuat.androidconnect.pairing.PairedPeer
 import com.himanshuat.androidconnect.ui.theme.Positive
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(manager: ConnectionManager) {
     var showScanner by remember { mutableStateOf(false) }
     val context = LocalContext.current
+
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) showScanner = true
     }
@@ -86,16 +89,6 @@ fun HomeScreen(manager: ConnectionManager) {
         uri?.let { manager.sendFile(it) }
     }
     val callPermissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
-    val requestCallPerms = {
-        callPermissions.launch(
-            arrayOf(
-                Manifest.permission.READ_PHONE_STATE,
-                Manifest.permission.ANSWER_PHONE_CALLS,
-                Manifest.permission.READ_CALL_LOG,
-                Manifest.permission.READ_CONTACTS,
-            ),
-        )
-    }
 
     if (showScanner) {
         QrScannerScreen(
@@ -110,6 +103,8 @@ fun HomeScreen(manager: ConnectionManager) {
     val discovered by manager.discovered.collectAsState()
     val pairingMode by manager.pairingMode.collectAsState()
     val transfers by manager.fileTransfer.transfers.collectAsState()
+    val notifOn by manager.notificationsEnabled.collectAsState()
+    val callsOn by manager.callsEnabled.collectAsState()
 
     val connected = status.startsWith("Connected")
     val pairedIds = paired.map { it.id }.toSet()
@@ -125,9 +120,7 @@ fun HomeScreen(manager: ConnectionManager) {
                         Text("AndroidConnect")
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
     ) { inner ->
@@ -144,20 +137,36 @@ fun HomeScreen(manager: ConnectionManager) {
                     QuickAction(Icons.Rounded.Send, "Send file", { filePicker.launch("*/*") }, Modifier.weight(1f))
                 }
             }
+
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    QuickAction(
-                        Icons.Rounded.Notifications, "Notifications",
-                        { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
-                        Modifier.weight(1f),
-                    )
-                    QuickAction(Icons.Rounded.Phone, "Call control", requestCallPerms, Modifier.weight(1f))
-                }
+                SharingCard(
+                    notifOn = notifOn,
+                    callsOn = callsOn,
+                    onNotif = { on ->
+                        manager.setNotificationsEnabled(on)
+                        if (on && !hasNotificationAccess(context)) {
+                            context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                        }
+                    },
+                    onCalls = { on ->
+                        manager.setCallsEnabled(on)
+                        if (on) callPermissions.launch(
+                            arrayOf(
+                                Manifest.permission.READ_PHONE_STATE,
+                                Manifest.permission.ANSWER_PHONE_CALLS,
+                                Manifest.permission.READ_CALL_LOG,
+                                Manifest.permission.READ_CONTACTS,
+                            ),
+                        )
+                    },
+                )
             }
 
             if (transfers.isNotEmpty()) {
                 item { SectionLabel("Transfers") }
-                items(transfers.takeLast(6).reversed(), key = { it.id }) { TransferRow(it) }
+                items(transfers.takeLast(8).reversed(), key = { it.id }) { t ->
+                    TransferRow(t) { openTransfer(context, t) }
+                }
             }
 
             if (paired.isNotEmpty()) {
@@ -188,8 +197,9 @@ private fun HeroCard(
     pairingMode: Boolean,
     onPairingChange: (Boolean) -> Unit,
 ) {
-    val accent = MaterialTheme.colorScheme.primary
-    val ring by animateColorAsState(if (connected) Positive else accent, label = "ring")
+    val ring by animateColorAsState(
+        if (connected) Positive else MaterialTheme.colorScheme.primary, label = "ring",
+    )
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         modifier = Modifier.fillMaxWidth(),
@@ -208,8 +218,7 @@ private fun HeroCard(
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        if (connected) status.removePrefix("Connected to ").ifEmpty { "Connected" }
-                        else "Not connected",
+                        if (connected) status.removePrefix("Connected to ").ifEmpty { "Connected" } else "Not connected",
                         style = MaterialTheme.typography.titleMedium,
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
@@ -250,6 +259,56 @@ private fun QuickAction(icon: ImageVector, label: String, onClick: () -> Unit, m
 }
 
 @Composable
+private fun SharingCard(
+    notifOn: Boolean,
+    callsOn: Boolean,
+    onNotif: (Boolean) -> Unit,
+    onCalls: (Boolean) -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column {
+            ToggleRow(
+                Icons.Rounded.Notifications, "Mirror notifications",
+                "Show this phone's notifications on your Mac", notifOn, onNotif,
+            )
+            HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+            ToggleRow(
+                Icons.Rounded.Phone, "Share calls",
+                "Caller ID + answer/decline on your Mac", callsOn, onCalls,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ToggleRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon, null,
+            tint = if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+@Composable
 private fun DeviceRow(name: String, detail: String, connected: Boolean, trailing: @Composable () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -277,10 +336,11 @@ private fun DeviceRow(name: String, detail: String, connected: Boolean, trailing
 }
 
 @Composable
-private fun TransferRow(transfer: FileTransferHandler.Transfer) {
+private fun TransferRow(transfer: FileTransferHandler.Transfer, onOpen: () -> Unit) {
+    val openable = transfer.done && !transfer.failed
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().then(if (openable) Modifier.clickable(onClick = onOpen) else Modifier),
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -298,12 +358,15 @@ private fun TransferRow(transfer: FileTransferHandler.Transfer) {
                 Text(
                     when {
                         transfer.failed -> "Failed"
-                        transfer.done -> "Done"
+                        transfer.done -> if (openable) "Open" else "Done"
                         else -> "${(transfer.progress * 100).toInt()}%"
                     },
                     style = MaterialTheme.typography.labelMedium,
-                    color = if (transfer.failed) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = when {
+                        transfer.failed -> MaterialTheme.colorScheme.error
+                        openable -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                 )
             }
             if (!transfer.done && !transfer.failed) {
@@ -321,4 +384,27 @@ private fun SectionLabel(text: String) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 8.dp, start = 4.dp),
     )
+}
+
+private fun hasNotificationAccess(context: Context): Boolean =
+    Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
+        ?.contains(context.packageName) == true
+
+/** Open a completed transfer in another app. Incoming → the saved file via FileProvider; outgoing → its source. */
+private fun openTransfer(context: Context, t: FileTransferHandler.Transfer) {
+    val path = t.localPath ?: return
+    if (!t.done || t.failed) return
+    val uri = runCatching {
+        if (t.incoming) {
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", File(path))
+        } else {
+            Uri.parse(path)
+        }
+    }.getOrNull() ?: return
+    val mime = context.contentResolver.getType(uri) ?: "*/*"
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, mime)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    runCatching { context.startActivity(intent) }
 }

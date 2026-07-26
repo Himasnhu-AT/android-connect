@@ -36,7 +36,7 @@ struct DashboardView: View {
             VStack(spacing: 14) {
                 hero(manager)
                 if let call = manager.callService.current { CallCard(call: call, manager: manager) }
-                pairing(manager)
+                if manager.connectedPeerName == nil { pairing(manager) }   // hide QR/pairing once connected
                 devices(manager)
                 transfers(manager)
             }
@@ -231,6 +231,8 @@ private struct DeviceRow<Trailing: View>: View {
 private struct TransferRow: View {
     let transfer: FileTransferService.Transfer
 
+    private var openable: Bool { transfer.done && !transfer.failed && transfer.localURL != nil }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 8) {
@@ -238,14 +240,19 @@ private struct TransferRow: View {
                     .foregroundStyle(transfer.failed ? .red : transfer.done ? .green : Color.accentColor)
                 Text(transfer.name).lineLimit(1).truncationMode(.middle)
                 Spacer()
-                Text(transfer.failed ? "Failed" : transfer.done ? "Done" : "\(Int(transfer.progress * 100))%")
+                Text(transfer.failed ? "Failed" : openable ? "Open" : transfer.done ? "Done" : "\(Int(transfer.progress * 100))%")
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(transfer.failed ? .red : .secondary)
+                    .foregroundStyle(transfer.failed ? .red : openable ? Color.accentColor : .secondary)
             }
             if !transfer.done && !transfer.failed {
                 ProgressView(value: transfer.progress).controlSize(.small)
             }
         }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if openable, let url = transfer.localURL { NSWorkspace.shared.open(url) }
+        }
+        .help(openable ? "Open \(transfer.name)" : "")
     }
 }
 

@@ -9,6 +9,7 @@ import SwiftUI
 
 struct PairingView: View {
     @Bindable var model: AppModel
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 16) {
@@ -30,6 +31,10 @@ struct PairingView: View {
         .frame(width: 320, height: 400)
         .onAppear { model.manager?.setPairing(true) }
         .onDisappear { model.manager?.setPairing(false) }
+        // Once a phone connects there's nothing left to scan — close the QR automatically.
+        .onChange(of: model.manager?.connectedPeerName) { _, name in
+            if name != nil { dismiss() }
+        }
     }
 
     @ViewBuilder

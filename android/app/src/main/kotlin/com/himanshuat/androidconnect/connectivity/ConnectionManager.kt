@@ -71,9 +71,9 @@ class ConnectionManager(context: Context) {
     /** Set by NotificationRelayService while it's connected, so the Mac can reply/dismiss. */
     var notificationSink: NotificationSink? = null
 
-    /** Forward a locally-observed notification (or its removal) to the Mac. */
+    /** Forward a locally-observed notification (or its removal) to the Mac, if sharing is enabled. */
     fun sendNotification(message: ControlMessage) {
-        active?.send(message)
+        if (_notificationsEnabled.value) active?.send(message)
     }
 
     private val _discovered = MutableStateFlow<List<DiscoveredPeer>>(emptyList())
@@ -84,6 +84,13 @@ class ConnectionManager(context: Context) {
     val status: StateFlow<String> = _status.asStateFlow()
     private val _pairingMode = MutableStateFlow(false)
     val pairingMode: StateFlow<Boolean> = _pairingMode.asStateFlow()
+    private val _notificationsEnabled = MutableStateFlow(prefs.notificationsEnabled)
+    val notificationsEnabled: StateFlow<Boolean> = _notificationsEnabled.asStateFlow()
+    private val _callsEnabled = MutableStateFlow(prefs.callsEnabled)
+    val callsEnabled: StateFlow<Boolean> = _callsEnabled.asStateFlow()
+
+    fun setNotificationsEnabled(on: Boolean) { prefs.notificationsEnabled = on; _notificationsEnabled.value = on }
+    fun setCallsEnabled(on: Boolean) { prefs.callsEnabled = on; _callsEnabled.value = on }
 
     private var serverSocket: SSLServerSocket? = null
     private var active: Connection? = null
@@ -107,7 +114,7 @@ class ConnectionManager(context: Context) {
                 clipboard.start()
                 fileTransfer.onSend = { message -> active?.send(message) }
                 fileTransfer.onSendBinary = { transferId, chunk -> active?.sendBinary(transferId, chunk) }
-                callHandler.onCallState = { state -> active?.send(state) }
+                callHandler.onCallState = { state -> if (_callsEnabled.value) active?.send(state) }
                 callHandler.start()
                 _status.value = "Waiting for Mac…"
                 acceptLoop(server)
