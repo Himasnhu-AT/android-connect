@@ -79,11 +79,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.service)
     implementation(libs.androidx.activity.compose)
 
-    implementation(libs.androidx.camera.core)
-    implementation(libs.androidx.camera.camera2)
-    implementation(libs.androidx.camera.lifecycle)
-    implementation(libs.androidx.camera.view)
-    implementation(libs.mlkit.barcode)
+    // Lightweight QR scanning (replaces CameraX + MLKit — smaller APK, no 16 KB-unaligned native libs).
+    implementation(libs.zxing.android.embedded)
 
     val composeBom = platform(libs.androidx.compose.bom)
     implementation(composeBom)
