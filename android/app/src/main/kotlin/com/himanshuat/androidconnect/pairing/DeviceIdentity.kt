@@ -24,6 +24,17 @@ class DeviceIdentity private constructor(
     val fingerprint: String,
     val deviceId: String,
 ) {
+    /** Our certificate's DER bytes (SHA-256 of these is [fingerprint]). */
+    val certificateDer: ByteArray get() = certificate.encoded
+
+    /** ECDSA-SHA256 sign [data] with the Keystore identity key (proves we hold this cert's key). */
+    fun sign(data: ByteArray): ByteArray =
+        java.security.Signature.getInstance("SHA256withECDSA").run {
+            initSign(privateKey)
+            update(data)
+            sign()
+        }
+
     companion object {
         private const val ALIAS = "androidconnect.identity"
         private const val KEYSTORE = "AndroidKeyStore"

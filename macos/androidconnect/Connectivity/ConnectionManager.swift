@@ -9,6 +9,9 @@
 import Foundation
 import Network
 import Observation
+import os
+
+private let netLog = Logger(subsystem: "dev.freeholt.androidconnect", category: "net")
 
 @MainActor
 @Observable
@@ -34,6 +37,7 @@ final class ConnectionManager {
     private var params: NWParameters?
     private var active: Connection?
     private var activeFingerprint = ""
+    private var pendingNonce = ""
     private var lastPeerHello: Hello?
     private var pingTask: Task<Void, Never>?
     private var connectingId: String?
@@ -56,9 +60,11 @@ final class ConnectionManager {
                 serviceName: identity.deviceId,
                 txt: txtRecord(),
                 onPort: { port in
+                    netLog.log("listener up on port \(port, privacy: .public)")
                     Task { @MainActor [weak self] in self?.advertisedPort = port }
                 },
             ) { nwConnection in
+                netLog.log("inbound TCP connection accepted; starting TLS")
                 let wrapper = Connection(nwConnection, isServer: true, queue: q)
                 Task { @MainActor [weak self] in self?.adopt(wrapper) }
             }
@@ -134,46 +140,48 @@ final class ConnectionManager {
     private func handle(_ event: ConnectionEvent, on connection: Connection) {
         guard active === connection else { return }
         switch event {
-        case .ready(let peerFingerprint):
-            activeFingerprint = peerFingerprint
+        case .ready:
             connectingId = nil
+            activeFingerprint = ""            // no TLS client cert; set once the phone proves itself
+            let nonce = Self.makeNonce()
+            pendingNonce = nonce
+            netLog.log("TLS up (server) — sent hello + authChallenge")
             connection.send(.hello(makeHello()))
-            if !connection.isServer, !trust.isTrusted(fingerprint: peerFingerprint) {
-                connection.send(.pairRequest(PairRequest(
-                    id: identity.deviceId, name: identity.deviceName, plat: "macos",
-                    fp: identity.fingerprint)))
-            }
+            connection.send(.authChallenge(AuthChallenge(nonce: nonce)))
             startPingLoop(connection)
         case .message(let message):
             handleMessage(message, on: connection)
         case .binaryChunk(let transferId, let data):
             fileTransfer.handleChunk(transferId: transferId, data: data)
-        case .closed, .failed:
-            pingTask?.cancel()
-            active = nil
-            connectingId = nil
-            connectedPeerName = nil
-            statusText = pairedPeers.isEmpty ? "Waiting for phone…" : "Reconnecting…"
-            maybeAutoConnect()
+        case .closed:
+            netLog.log("connection closed (isServer=\(connection.isServer, privacy: .public))")
+            teardownActive()
+        case .failed(let reason):
+            netLog.error("connection FAILED (isServer=\(connection.isServer, privacy: .public)): \(reason, privacy: .public)")
+            teardownActive()
         }
+    }
+
+    private func teardownActive() {
+        pingTask?.cancel()
+        active = nil
+        connectingId = nil
+        connectedPeerName = nil
+        statusText = pairedPeers.isEmpty ? "Waiting for phone…" : "Reconnecting…"
+        maybeAutoConnect()
     }
 
     /// Update the nearby list and, if a paired phone is visible and we're idle, reconnect silently.
     private func updateDiscovered(_ peers: [DiscoveredPeer]) {
+        netLog.log("discovered \(peers.count, privacy: .public) phone(s): \(peers.map { "\($0.name)[\($0.fingerprint.prefix(8))]" }.joined(separator: ", "), privacy: .public)")
         discovered = peers
         maybeAutoConnect()
     }
 
-    /// Silent reconnect: dial a trusted, discovered peer. A deterministic tie-breaker (lower deviceId
-    /// initiates) ensures only one side dials, so the two apps don't flap between connections.
-    private func maybeAutoConnect() {
-        guard active == nil, connectingId == nil else { return }
-        guard let peer = discovered.first(where: {
-            trust.isTrusted(fingerprint: $0.fingerprint) && identity.deviceId < $0.id
-        }) else { return }
-        connectingId = peer.id
-        pair(with: peer)
-    }
+    /// The Mac is always the TLS *server*: the phone dials us. (macOS Network.framework can't verify
+    /// a client cert, so it can't be the TLS client in a mutual scheme; and on many Wi-Fi networks
+    /// only phone→Mac connections get through.) So we never dial — the phone drives (re)connection.
+    private func maybeAutoConnect() {}
 
     private func startPingLoop(_ connection: Connection) {
         pingTask?.cancel()
@@ -189,6 +197,12 @@ final class ConnectionManager {
     }
 
     private func handleMessage(_ message: Message, on connection: Connection) {
+        // Until the phone proves its identity (authResponse sets activeFingerprint), honor only the
+        // handshake messages — nothing acts on an unauthenticated peer.
+        switch message {
+        case .hello, .ping, .pong, .authResponse: break
+        default: guard !activeFingerprint.isEmpty else { return }
+        }
         switch message {
         case .hello(let hello):
             lastPeerHello = hello
@@ -222,6 +236,9 @@ final class ConnectionManager {
                 statusText = "Pairing rejected"
             }
 
+        case .authResponse(let response):
+            handleAuthResponse(response, on: connection)
+
         case .clipboard(let clip):
             clipboard.apply(clip.text)
 
@@ -254,6 +271,46 @@ final class ConnectionManager {
 
     private func refreshPaired() {
         pairedPeers = trust.all()
+    }
+
+    /// The phone answered our challenge: verify it holds its identity key, then pair or reconnect.
+    private func handleAuthResponse(_ response: AuthResponse, on connection: Connection) {
+        guard let certDER = Data(base64Encoded: response.cert),
+              let signature = Data(base64Encoded: response.sig),
+              let fingerprint = DeviceIdentity.verify(
+                  signature: signature, over: Data(pendingNonce.utf8), certDER: certDER)
+        else {
+            netLog.error("auth FAILED — bad signature; dropping connection")
+            connection.cancel()
+            return
+        }
+        activeFingerprint = fingerprint
+        netLog.log("phone identity verified fp=\(fingerprint, privacy: .public)")
+
+        let name = lastPeerHello?.name ?? "phone"
+        if trust.isTrusted(fingerprint: fingerprint) {
+            connectedPeerName = name
+            statusText = "Connected to \(name)"
+        } else if isPairing || gate.accepts(fingerprint) {
+            if let hello = lastPeerHello {
+                trust.add(PairedPeer(id: hello.id, name: hello.name, plat: hello.plat, fingerprint: fingerprint))
+                refreshPaired()
+            }
+            connection.send(.pairResponse(PairResponse(
+                accepted: true, id: identity.deviceId, name: identity.deviceName,
+                plat: "macos", fp: identity.fingerprint)))
+            setPairing(false)
+            connectedPeerName = name
+            statusText = "Connected to \(name)"
+        } else {
+            connection.send(.pairResponse(PairResponse(accepted: false, reason: "Mac isn't ready to pair")))
+            netLog.log("phone not trusted and not in pairing mode — rejected")
+            connection.cancel()
+        }
+    }
+
+    private static func makeNonce() -> String {
+        Data((0..<32).map { _ in UInt8.random(in: 0...255) }).base64EncodedString()
     }
 
     private func makeHello() -> Hello {

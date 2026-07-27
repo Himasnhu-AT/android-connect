@@ -3,6 +3,10 @@
 *.log
 *.tmp
 
+# ─── Build output (build.sh) ───────────────────────────────
+/dist/
+/.build/
+
 # ─── macOS / Xcode ─────────────────────────────────────────
 macos/**/xcuserdata/
 macos/**/*.xcuserstate

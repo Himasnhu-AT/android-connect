@@ -51,6 +51,20 @@ nonisolated struct PairResponse: Codable, Equatable, Sendable {
     var reason: String?
 }
 
+// Identity proof. macOS Network.framework can't verify a peer *client* cert as a TLS server, so the
+// Android phone (always the TLS client) proves possession of its identity key at the app layer: the
+// Mac sends a nonce, the phone signs it and returns its cert. See /protocol §4.
+nonisolated struct AuthChallenge: Codable, Equatable, Sendable {
+    var t = "authChallenge"
+    var nonce: String            // base64 of 32 random bytes
+}
+
+nonisolated struct AuthResponse: Codable, Equatable, Sendable {
+    var t = "authResponse"
+    var cert: String             // base64 DER of the sender's TLS certificate
+    var sig: String              // base64 ECDSA-SHA256 signature over the nonce's UTF-8 bytes
+}
+
 nonisolated struct Clipboard: Codable, Equatable, Sendable {
     var t = "clipboard"
     var contentType = "text"
@@ -144,6 +158,8 @@ nonisolated enum Message: Codable, Equatable, Sendable {
     case pong(Pong)
     case pairRequest(PairRequest)
     case pairResponse(PairResponse)
+    case authChallenge(AuthChallenge)
+    case authResponse(AuthResponse)
     case clipboard(Clipboard)
     case notifPosted(NotifPosted)
     case notifRemoved(NotifRemoved)
@@ -168,6 +184,8 @@ nonisolated enum Message: Codable, Equatable, Sendable {
         case "pong": self = .pong(try Pong(from: decoder))
         case "pairRequest": self = .pairRequest(try PairRequest(from: decoder))
         case "pairResponse": self = .pairResponse(try PairResponse(from: decoder))
+        case "authChallenge": self = .authChallenge(try AuthChallenge(from: decoder))
+        case "authResponse": self = .authResponse(try AuthResponse(from: decoder))
         case "clipboard": self = .clipboard(try Clipboard(from: decoder))
         case "notifPosted": self = .notifPosted(try NotifPosted(from: decoder))
         case "notifRemoved": self = .notifRemoved(try NotifRemoved(from: decoder))
@@ -193,6 +211,8 @@ nonisolated enum Message: Codable, Equatable, Sendable {
         case .pong(let m): try m.encode(to: encoder)
         case .pairRequest(let m): try m.encode(to: encoder)
         case .pairResponse(let m): try m.encode(to: encoder)
+        case .authChallenge(let m): try m.encode(to: encoder)
+        case .authResponse(let m): try m.encode(to: encoder)
         case .clipboard(let m): try m.encode(to: encoder)
         case .notifPosted(let m): try m.encode(to: encoder)
         case .notifRemoved(let m): try m.encode(to: encoder)

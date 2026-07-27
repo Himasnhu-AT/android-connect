@@ -15,6 +15,8 @@ struct ProtocolTests {
         let messages: [Message] = [
             .hello(Hello(pv: 1, id: "mac-1", name: "MacBook", plat: "macos", caps: ["clipboard", "files"])),
             .ping(Ping(nonce: "n1")),
+            .authChallenge(AuthChallenge(nonce: "bm9uY2U=")),
+            .authResponse(AuthResponse(cert: "Y2VydERFUg==", sig: "c2lnbmF0dXJl")),
             .clipboard(Clipboard(text: "hello world")),
             .fileOffer(FileOffer(transferId: "t1", name: "photo.jpg", size: 12345, mime: "image/jpeg")),
             .notifPosted(NotifPosted(key: "k1", appName: "Messages", pkg: "com.example",

@@ -23,6 +23,7 @@ final class FileTransferService {
         let incoming: Bool
         var done: Bool
         var failed: Bool
+        var localURL: URL?    // where the file lives on this Mac (to open/reveal it)
         var progress: Double {
             if done { return 1 }
             return size > 0 ? min(1, Double(transferred) / Double(size)) : 0
@@ -46,7 +47,7 @@ final class FileTransferService {
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         let id = Self.newTransferIdHex()
         pendingOutgoing[id] = url
-        transfers.append(Transfer(id: id, name: name, size: size, transferred: 0, incoming: false, done: false, failed: false))
+        transfers.append(Transfer(id: id, name: name, size: size, transferred: 0, incoming: false, done: false, failed: false, localURL: url))
         onSend?(.fileOffer(FileOffer(transferId: id, name: name, size: size, mime: nil)))
     }
 
@@ -77,7 +78,7 @@ final class FileTransferService {
             return
         }
         incomingHandles[offer.transferId] = handle
-        transfers.append(Transfer(id: offer.transferId, name: offer.name, size: offer.size, transferred: 0, incoming: true, done: false, failed: false))
+        transfers.append(Transfer(id: offer.transferId, name: offer.name, size: offer.size, transferred: 0, incoming: true, done: false, failed: false, localURL: url))
         onSend?(.fileAccept(FileAccept(transferId: offer.transferId)))
     }
 

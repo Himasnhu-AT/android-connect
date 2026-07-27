@@ -17,6 +17,16 @@ class LocalPrefs(context: Context) {
         get() = prefs.getString(KEY_NAME, null) ?: defaultName()
         set(value) { prefs.edit().putString(KEY_NAME, value).apply() }
 
+    /** Whether to mirror this phone's notifications to the Mac (user-toggleable). */
+    var notificationsEnabled: Boolean
+        get() = prefs.getBoolean(KEY_NOTIF, false)
+        set(value) { prefs.edit().putBoolean(KEY_NOTIF, value).apply() }
+
+    /** Whether to share call state with the Mac (user-toggleable). */
+    var callsEnabled: Boolean
+        get() = prefs.getBoolean(KEY_CALLS, false)
+        set(value) { prefs.edit().putBoolean(KEY_CALLS, value).apply() }
+
     private fun defaultName(): String {
         val model = Build.MODEL?.takeIf { it.isNotBlank() } ?: "Android"
         return model.replaceFirstChar { it.uppercase() }
@@ -25,5 +35,7 @@ class LocalPrefs(context: Context) {
     private companion object {
         const val KEY_ID = "deviceId"
         const val KEY_NAME = "deviceName"
+        const val KEY_NOTIF = "notificationsEnabled"
+        const val KEY_CALLS = "callsEnabled"
     }
 }

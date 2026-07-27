@@ -34,6 +34,8 @@ class FileTransferHandler(context: Context, private val scope: CoroutineScope) {
         val incoming: Boolean,
         val done: Boolean,
         val failed: Boolean,
+        /** Incoming: absolute path of the saved file. Outgoing: the source content-URI string. */
+        val localPath: String? = null,
     ) {
         val progress: Float
             get() = when {
@@ -62,7 +64,7 @@ class FileTransferHandler(context: Context, private val scope: CoroutineScope) {
         val (name, size) = queryMeta(uri)
         val idHex = newIdHex()
         synchronized(lock) { pendingOutgoing[idHex] = uri }
-        addTransfer(Transfer(idHex, name, size, 0, incoming = false, done = false, failed = false))
+        addTransfer(Transfer(idHex, name, size, 0, incoming = false, done = false, failed = false, localPath = uri.toString()))
         onSend?.invoke(FileOffer(transferId = idHex, name = name, size = size, mime = resolver.getType(uri)))
     }
 
@@ -80,13 +82,14 @@ class FileTransferHandler(context: Context, private val scope: CoroutineScope) {
 
     fun handleOffer(offer: FileOffer) {
         val dir = appContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-        val out = runCatching { FileOutputStream(File(dir, sanitize(offer.name))) }.getOrNull()
+        val file = File(dir, sanitize(offer.name))
+        val out = runCatching { FileOutputStream(file) }.getOrNull()
         if (out == null) {
             onSend?.invoke(FileReject(transferId = offer.transferId, reason = "cannot write"))
             return
         }
         synchronized(lock) { incoming[offer.transferId] = out }
-        addTransfer(Transfer(offer.transferId, offer.name, offer.size, 0, incoming = true, done = false, failed = false))
+        addTransfer(Transfer(offer.transferId, offer.name, offer.size, 0, incoming = true, done = false, failed = false, localPath = file.absolutePath))
         onSend?.invoke(FileAccept(transferId = offer.transferId))
     }
 
